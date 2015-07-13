@@ -1,0 +1,212 @@
+---
+title: |
+  | Classifying The Quality Of Activity
+  | With Machine Learning
+output:
+  pdf_document: default
+  html_document:
+    keep_md: yes
+date: "July 20, 2015"
+---
+
+```{r, echo=FALSE}
+# Load Required Packages:
+suppressMessages(library(lattice))
+suppressMessages(library(ggplot2))
+suppressMessages(library(caret))
+suppressMessages(library(randomForest))
+```
+
+## Executive Summary:
+
+The goal of this project is to develop a model capable 
+of predicting the quality of weight lifting activity 
+from data collected from accelerometers on the belt, 
+forearm, arm, and dumbell of six participants. The 
+participants were asked to perform barbell lifts 
+correctly and incorrectly in five different ways, 
+with "A" being the correct way and "B" - "E" being 
+the incorrect ways.  
+
+For more information about the original study, 
+please see: http://groupware.les.inf.puc-rio.br/har  
+
+## Data Cleaning & Exploratory Analysis:
+
+```{r, echo=FALSE, cache=TRUE}
+# Download The Training Data Set:
+url <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+download.file(url, destfile="pml-training.csv", method="curl")
+masterset <- read.csv("pml-training.csv")
+```
+
+```{r, echo=FALSE}
+mrow <- nrow(masterset)
+mcol <- ncol(masterset)
+```
+
+The master dataset is comprised of `r mrow` observations across
+`r mcol` variables. The distribution of the classe variable
+is shown in Figure 1 in the Appendix. Note that the data is 
+not uniformly distributed, especially with regards to the 
+"A" results. This skewness indicates that cross-validation
+is a good strategy given the possible dataset sizes for 
+training and testing.
+
+The first step is to divide the master dataset into a training
+dataset and a testing dataset. The division is such that the
+training set contains 70% of the observations, and the testing 
+set contains the remaining 30% of the observations. (The testing 
+set is then set aside for the final check of the model.)
+
+```{r}
+# Set The Seed For Reproducibility:
+set.seed(12345)
+
+# Split The Master Dataset Into Training & Testing:
+inMaster <- createDataPartition(y = masterset$classe, 
+                                p = 0.70, list = FALSE)
+training <- masterset[ inMaster,]
+testing  <- masterset[-inMaster,]
+```
+
+```{r, echo=FALSE}
+smry <- summary(masterset)
+```
+
+Examining the summary output (not shown) for the training set 
+reveals a number of variables that are either used for accounting 
+(e.g., user name, timestamps, windows, etc.) or else contain high
+percentages of missing or empty values. Removing these variables
+results in the following:
+
+```{r}
+cleanCols <- c("roll_belt","pitch_belt",
+               "yaw_belt","total_accel_belt",
+               "gyros_belt_x","gyros_belt_y","gyros_belt_z",
+               "accel_belt_x","accel_belt_y","accel_belt_z",
+               "magnet_belt_x","magnet_belt_y","magnet_belt_z",
+               "roll_arm","pitch_arm",
+               "yaw_arm","total_accel_arm",
+               "gyros_arm_x","gyros_arm_y","gyros_arm_z",
+               "accel_arm_x","accel_arm_y","accel_arm_z",
+               "magnet_arm_x","magnet_arm_y","magnet_arm_z",
+               "roll_dumbbell","pitch_dumbbell",
+               "yaw_dumbbell","total_accel_dumbbell",
+               "gyros_dumbbell_x","gyros_dumbbell_y","gyros_dumbbell_z",
+               "accel_dumbbell_x","accel_dumbbell_y","accel_dumbbell_z",
+               "magnet_dumbbell_x","magnet_dumbbell_y","magnet_dumbbell_z",
+               "roll_forearm","pitch_forearm",
+               "yaw_forearm","total_accel_forearm",
+               "gyros_forearm_x","gyros_forearm_y","gyros_forearm_z",
+               "accel_forearm_x","accel_forearm_y","accel_forearm_z",
+               "magnet_forearm_x","magnet_forearm_y","magnet_forearm_z",
+               "classe")
+```
+
+Note that this list includes the classe variable, which is the one
+the model will attempt to predict. 
+
+The training and testing sets can now be subsetted to just these 
+`r length(cleanCols)` variables.
+
+```{r}
+cln_train <- training[cleanCols]
+cln_test  <- testing[cleanCols]
+```
+
+## Model Selection:
+
+The goal of the model is to predict the correct categorization 
+for the quality of the weight lifting activity (classe variable). 
+Tree-based models in general and random forest models in particular 
+are especially appropriate for this type of prediction. After much
+experimentation, the final model that was chosen for this project is
+a random forest with cross validation resampling (three iterations). 
+This combination in conjunction with a training set size of 70% of 
+the observations provides a good balance between a reasonable run 
+time to train the model and the accuracy of the predictions 
+(as will be seen below).  
+
+```{r, cache=TRUE}
+rfMod <- train(classe ~ ., method = "rf",
+               data = cln_train,
+               trControl = trainControl(method = "cv"), number = 3)
+rfMod
+```
+
+```{r, echo=FALSE}
+mtryFinal    <- rfMod$finalModel$mtry
+mtryAccuracy <- rfMod$results$Accuracy[rfMod$results$mtry == mtryFinal]
+```
+
+Notice that the cross-validated resampling was done with ten folds, 
+and that the accuracy of the optimal model against the training set
+was `r round(mtryAccuracy, 4)`.
+
+The results of running this model against the testing set are as
+follows:
+
+```{r}
+# Predict Against The Testing Set:
+rfPrdTest <- predict(rfMod, cln_test)
+# Check The Results, Especially The Accuracy:
+confusionMatrix(cln_test$classe, rfPrdTest)
+```
+
+```{r, echo=FALSE}
+# Calculate The Misclassification Rate:
+ac <- round(confusionMatrix(cln_test$classe, rfPrdTest)$overall[1], 4)
+misclass <- function(values, prediction) {
+    sum(prediction != values) / length(values)
+}
+mc <- round(misclass(cln_test$classe, rfPrdTest), 4)
+```
+
+The expected out of sample error rate is `r ac`, and 
+this translates into a misclassification rate of `r mc`.
+
+Notice also that the accuracy is lower on the testing set 
+than it is on the training set, which is to be expected.
+
+These results are shown graphically in Figure 2 in the Appendix.
+
+## Conclusion:
+
+The random forest model used in this project was able to predict
+all twenty test cases correctly for the second part of the project. 
+The prediction is not however perfect. For the twenty test cases,
+the model is expected to get `r ac * 20` correct on average, and 
+repeated runs of the model against the validation set for the 
+second part of the project did indeed prove this out. It is also 
+interesting to note in Figure 2 that when the model did miss the 
+classification, it was only off by one. For example, if the actual 
+value was "C", when the model missed, it missed by "B" or "D" 
+rather than "A" or "E".
+
+----------
+## Appendix:
+
+### Figure 1: Distribution Of classe Variable In Master Dataset
+
+```{r, fig.width = 8, fig.height = 5, echo=FALSE}
+ggplot(masterset, aes(classe, fill = classe)) +
+    geom_histogram(aes(colour = classe)) +
+    labs(title = "Distribution Of classe In Master Dataset")
+```
+
+### Figure 2: Scatterplot Of Aggregated Results Of Model Run
+
+```{r, fig.width = 8, fig.height = 5, echo=FALSE}
+prdCorrect <- rfPrdTest == cln_test$classe
+prdDF <- data.frame("Actual"     = cln_test$classe,
+                    "Prediction" = rfPrdTest, 
+                    "Correct"    = prdCorrect)
+mainTitle <- paste(
+    "Aggregated Actual vs. Predicted classe In Testing Set\n",
+    "(Misclassification Error Rate:", mc, ")\n")
+ggplot(prdDF, aes(Actual, Prediction)) + 
+    geom_point(aes(colour = Correct)) +
+    labs(title = mainTitle) +
+    scale_color_brewer(palette = "Set1")
+```
